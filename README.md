@@ -137,7 +137,7 @@ kubectl bgswitch status my-app
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/bgswitch.git
+git clone https://github.com/ghanatava/bgswitch.git
 cd bgswitch
 
 # Install dependencies
@@ -189,13 +189,6 @@ make cluster-down
 - [ ] Custom webhook integrations
 - [ ] Dashboard UI
 
-## 🤝 Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE)
 
 ## 🙏 Acknowledgments
 
@@ -211,6 +204,6 @@ Inspired by:
 
 ---
 
-**Built with ❤️ by [Your Name]**
+**Built with ❤️ by [Ghanatava]**
 
 *Making Kubernetes deployments safe and simple.*
