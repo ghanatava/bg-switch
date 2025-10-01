@@ -29,7 +29,7 @@ BGswitch automates progressive deployments:
 
 ```bash
 # Install the operator
-kubectl apply -f https://raw.githubusercontent.com/yourusername/bgswitch/main/deploy/operator.yaml
+kubectl apply -f https://raw.githubusercontent.com/ghanatava/bgswitch/main/deploy/operator.yaml
 
 # Verify installation
 kubectl get pods -n bgswitch-system
