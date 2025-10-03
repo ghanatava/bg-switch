@@ -207,8 +207,8 @@ bgswitch/
 
 **Commands:**
 ```bash
-kubebuilder init --domain bgswitch.dev --repo github.com/yourusername/bgswitch
-kubebuilder create api --group apps --version v1alpha1 --kind ProgressiveDeployment
+kubebuilder init --repo github.com/ghanatava/bgswitch
+kubebuilder create api --group apps --version v1alpha1 --kind ProgressiveDeployment --resource --controller
 ```
 
 #### Day 3-4: Controller Logic (8-10 hours)
