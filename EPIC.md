@@ -184,7 +184,8 @@ type ProgressiveDeploymentStatus struct {
 - [x] Initialize Go module
 - [x] Set up kubebuilder project
 - [x] Create CRD scaffold
-- [x] Define types (Spec, Status)
+- [x] Define types Spec
+- [x]  Define type Status
 - [x] Set up Git repository
 - [x] Create basic project structure
 
