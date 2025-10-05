@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +32,109 @@ import (
 type ProgressiveDeploymentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+// updateStatus updates the ProgressiveDeployment status
+func (r *ProgressiveDeploymentReconciler) updateStatus(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) error {
+	return r.Status().Update(ctx, pd)
+}
+
+func (r *ProgressiveDeploymentReconciler) handleInitializing(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Handling Initializing phase")
+
+	// TODO: Create canary deployment
+	// TODO: Verify target deployment exists
+
+	// For now, just move to Analyzing phase
+	pd.Status.Phase = "Analyzing"
+	pd.Status.CurrentStep = 0
+	pd.Status.CanaryPercentage = pd.Spec.CanarySteps[0]
+
+	if err := r.updateStatus(ctx, pd); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Moved to Analyzing phase", "step", pd.Status.CurrentStep, "percentage", pd.Status.CanaryPercentage)
+
+	// Requeue to handle Analyzing phase
+	return ctrl.Result{}, nil
+}
+
+func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Handling Analyzing phase")
+
+	// TODO: Check if stepDuration has elapsed
+	// TODO: Query Prometheus metrics
+	// TODO: Determine if healthy or unhealthy
+
+	// For now, just move to Promoting phase (simulate healthy)
+	pd.Status.Phase = "Promoting"
+	pd.Status.HealthStatus = "Healthy"
+
+	if err := r.updateStatus(ctx, pd); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Metrics healthy, moving to Promoting phase")
+
+	// Requeue to handle Promoting phase
+	return ctrl.Result{}, nil
+}
+
+// handlePromoting moves to the next canary step
+func (r *ProgressiveDeploymentReconciler) handlePromoting(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Handling Promoting phase")
+
+	// Check if we're at the last step
+	if pd.Status.CurrentStep >= len(pd.Spec.CanarySteps)-1 {
+		// Deployment complete!
+		log.Info("All steps completed successfully")
+		pd.Status.Phase = "Completed"
+		pd.Status.CanaryPercentage = 100
+
+		if err := r.updateStatus(ctx, pd); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	// Move to next step
+	pd.Status.CurrentStep++
+	pd.Status.CanaryPercentage = pd.Spec.CanarySteps[pd.Status.CurrentStep]
+	pd.Status.Phase = "Analyzing"
+
+	if err := r.updateStatus(ctx, pd); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Promoted to next step", "step", pd.Status.CurrentStep, "percentage", pd.Status.CanaryPercentage)
+
+	// Requeue to analyze the new step
+	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *ProgressiveDeploymentReconciler) handleRollingBack(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Handling RollingBack phase")
+
+	// TODO: Restore stable deployment
+	// TODO: Delete canary deployment
+
+	// For now, just mark as RolledBack
+	pd.Status.Phase = "RolledBack"
+	pd.Status.CanaryPercentage = 0
+
+	if err := r.updateStatus(ctx, pd); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Rollback completed")
+
+	return ctrl.Result{}, nil
 }
 
 // +kubebuilder:rbac:groups=apps.my.domain,resources=progressivedeployments,verbs=get;list;watch;create;update;patch;delete
@@ -47,10 +151,66 @@ type ProgressiveDeploymentReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.1/pkg/reconcile
 func (r *ProgressiveDeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+	// Step 1: Fetch the ProgressiveDeployment instance
+	var progressiveDeployment appsv1alpha1.ProgressiveDeployment
+	if err := r.Get(ctx, req.NamespacedName, &progressiveDeployment); err != nil {
+		if errors.IsNotFound(err) {
+			// Resource deleted, nothing to do
+			log.Info("ProgressiveDeployment resource not found. Ignoring since object must be deleted")
+			return ctrl.Result{}, nil
+		}
+		// Error reading the object - requeue
+		log.Error(err, "Failed to get ProgressiveDeployment")
+		return ctrl.Result{}, err
+	}
+	log.Info("Reconciling ProgressiveDeployment",
+		"name", progressiveDeployment.Name,
+		"phase", progressiveDeployment.Status.Phase,
+		"step", progressiveDeployment.Status.CurrentStep)
 
-	// TODO(user): your logic here
+	// Step 2: Initialize status if this is a new resource
+	if progressiveDeployment.Status.Phase == "" {
+		log.Info("Initializing new ProgressiveDeployment")
+		progressiveDeployment.Status.Phase = "Initializing"
+		progressiveDeployment.Status.CurrentStep = 0
+		progressiveDeployment.Status.CanaryPercentage = 0
+		progressiveDeployment.Status.HealthStatus = "Unknown"
 
+		if err := r.updateStatus(ctx, &progressiveDeployment); err != nil {
+			log.Error(err, "Failed to initialize status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+	// Step 3: State machine - handle current phase
+	switch progressiveDeployment.Status.Phase {
+
+	case "Initializing":
+		return r.handleInitializing(ctx, &progressiveDeployment)
+
+	case "Analyzing":
+		return r.handleAnalyzing(ctx, &progressiveDeployment)
+
+	case "Promoting":
+		return r.handlePromoting(ctx, &progressiveDeployment)
+
+	case "RollingBack":
+		return r.handleRollingBack(ctx, &progressiveDeployment)
+
+	case "Completed", "RolledBack", "Failed":
+		// Terminal states - nothing to do
+		log.Info("ProgressiveDeployment in terminal state", "phase", progressiveDeployment.Status.Phase)
+		return ctrl.Result{}, nil
+
+	default:
+		// Unknown phase - reset to Initializing
+		log.Info("Unknown phase, resetting to Initializing", "phase", progressiveDeployment.Status.Phase)
+		progressiveDeployment.Status.Phase = "Initializing"
+		if err := r.updateStatus(ctx, &progressiveDeployment); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
 }
 

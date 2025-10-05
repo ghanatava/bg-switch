@@ -11,10 +11,28 @@ spec:
     kind: ProgressiveDeployment
     listKind: ProgressiveDeploymentList
     plural: progressivedeployments
+    shortNames:
+    - pd
     singular: progressivedeployment
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.currentStep
+      name: Step
+      type: integer
+    - jsonPath: .status.canaryPercentage
+      name: Canary%
+      type: integer
+    - jsonPath: .status.healthStatus
+      name: Health
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: ProgressiveDeployment is the Schema for the progressivedeployments
@@ -161,7 +179,7 @@ spec:
                 type: array
               currentStep:
                 description: CurrentStep is the current canary step index (0-based)
-                type: string
+                type: integer
               healthStatus:
                 description: HealthStatus indicates if the canary is healthy
                 enum:

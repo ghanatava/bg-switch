@@ -217,8 +217,8 @@ kubebuilder create api --group apps --version v1alpha1 --kind ProgressiveDeploym
 - [ ] Implement reconciliation loop
 - [ ] Watch target Deployment
 - [ ] Create canary Deployment on CRD creation
-- [ ] Implement basic state machine
-- [ ] Add logging
+- [x] Implement basic state machine
+- [x] Add logging
 
 **Core Logic:**
 ```go

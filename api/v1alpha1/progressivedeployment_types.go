@@ -78,7 +78,7 @@ type ProgressiveDeploymentStatus struct {
 	// +kubebuilder:validation:Enum=Initializing;Analyzing;Promoting;RollingBack;Completed;RolledBack;Failed
 	Phase string `json:"phase,omitempty"`
 	// CurrentStep is the current canary step index (0-based)
-	CurrentStep string `json:"currentStep,omitempty"`
+	CurrentStep int `json:"currentStep,omitempty"`
 	// CanaryPercentage is the current traffic percentage going to canary
 	CanaryPercentage int `json:"canaryPercentage,omitempty"`
 	// CanaryDeployment is the name of the canary Deployment
@@ -95,6 +95,12 @@ type ProgressiveDeploymentStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pd
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Step",type=integer,JSONPath=`.status.currentStep`
+// +kubebuilder:printcolumn:name="Canary%",type=integer,JSONPath=`.status.canaryPercentage`
+// +kubebuilder:printcolumn:name="Health",type=string,JSONPath=`.status.healthStatus`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ProgressiveDeployment is the Schema for the progressivedeployments API
 type ProgressiveDeployment struct {
