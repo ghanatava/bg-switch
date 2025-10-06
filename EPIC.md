@@ -251,11 +251,11 @@ kubectl apply -f config/samples/apps_v1alpha1_progressivedeployment.yaml
 #### Day 5-7: Traffic Shifting (8-10 hours)
 
 **Tasks:**
-- [ ] Implement replica calculation logic
-- [ ] Adjust stable and canary replica counts
-- [ ] Handle edge cases (min replicas, rounding)
-- [ ] Implement step progression
-- [ ] Add step timer logic
+- [x] Implement replica calculation logic
+- [x] Adjust stable and canary replica counts
+- [x] Handle edge cases (min replicas, rounding)
+- [x] Implement step progression
+- [x] Add step timer logic
 
 **Traffic Distribution Math:**
 ```

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"math"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -179,6 +180,7 @@ func (r *ProgressiveDeploymentReconciler) handleInitializing(ctx context.Context
 	return ctrl.Result{}, nil
 }
 
+// handleAnalyzing waits for stepDuration and checks metrics
 func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Handling Analyzing phase")
@@ -186,14 +188,31 @@ func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, p
 	stepDuration := pd.Spec.StepDuration.Duration
 	now := metav1.Now()
 
-	// If LastAnalysisTime is not set, this is the first time - set it and wait
+	// If LastAnalysisTime is not set, this is the first time - adjust traffic and wait
 	if pd.Status.LastAnalysisTime == nil {
-		log.Info("Starting analysis period", "duration", stepDuration)
+		log.Info("Starting analysis period", "duration", stepDuration, "canaryPercentage", pd.Status.CanaryPercentage)
+
+		// Get target deployment
+		targetDeployment, err := r.getTargetDeployment(ctx, pd)
+		if err != nil {
+			log.Error(err, "Failed to get target deployment for traffic shifting")
+			return ctrl.Result{}, err
+		}
+
+		// Adjust traffic based on current canary percentage
+		if err := r.adjustTraffic(ctx, pd, targetDeployment); err != nil {
+			log.Error(err, "Failed to adjust traffic")
+			return ctrl.Result{}, err
+		}
+
+		// Set analysis start time
 		pd.Status.LastAnalysisTime = &now
 		if err := r.updateStatus(ctx, pd); err != nil {
 			return ctrl.Result{}, err
 		}
-		// Wait for stepDuration before next reconcile
+
+		// Wait for stepDuration before analyzing metrics
+		log.Info("Traffic adjusted, waiting for stabilization", "duration", stepDuration)
 		return ctrl.Result{RequeueAfter: stepDuration}, nil
 	}
 
@@ -202,7 +221,6 @@ func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, p
 	if elapsed < stepDuration {
 		remaining := stepDuration - elapsed
 		log.Info("Still analyzing", "elapsed", elapsed, "remaining", remaining)
-		// Wait for remaining time
 		return ctrl.Result{RequeueAfter: remaining}, nil
 	}
 
@@ -277,6 +295,78 @@ func (r *ProgressiveDeploymentReconciler) handleRollingBack(ctx context.Context,
 	log.Info("Rollback completed")
 
 	return ctrl.Result{}, nil
+}
+
+// calculateReplicaDistribution calculates stable and canary replica counts
+func calculateReplicaDistribution(totalReplicas int, canaryPercentage int) (stableReplicas, canaryReplicas int32) {
+	if canaryPercentage <= 0 {
+		return int32(totalReplicas), 0
+	}
+
+	if canaryPercentage >= 100 {
+		return 0, int32(totalReplicas)
+	}
+
+	// Calculate canary replicas (round up to ensure traffic gets through)
+	canaryFloat := float64(totalReplicas) * float64(canaryPercentage) / 100.0
+	canaryReplicas = int32(math.Ceil(canaryFloat))
+
+	// Remaining go to stable
+	stableReplicas = int32(totalReplicas) - canaryReplicas
+
+	// Ensure we don't go negative
+	if stableReplicas < 0 {
+		stableReplicas = 0
+	}
+	if canaryReplicas < 0 {
+		canaryReplicas = 0
+	}
+
+	return stableReplicas, canaryReplicas
+}
+
+// adjustTraffic adjusts replica counts for stable and canary deployments
+func (r *ProgressiveDeploymentReconciler) adjustTraffic(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment, targetDeployment *appsv1.Deployment) error {
+	log := logf.FromContext(ctx)
+
+	// Get total desired replicas from target
+	totalReplicas := int(*targetDeployment.Spec.Replicas)
+
+	// Calculate distribution
+	stableReplicas, canaryReplicas := calculateReplicaDistribution(totalReplicas, pd.Status.CanaryPercentage)
+
+	log.Info("Calculating traffic distribution",
+		"total", totalReplicas,
+		"canaryPercentage", pd.Status.CanaryPercentage,
+		"stable", stableReplicas,
+		"canary", canaryReplicas)
+
+	// Update stable deployment (target)
+	targetDeployment.Spec.Replicas = &stableReplicas
+	if err := r.Update(ctx, targetDeployment); err != nil {
+		log.Error(err, "Failed to update stable deployment replicas")
+		return err
+	}
+	log.Info("Updated stable deployment", "replicas", stableReplicas)
+
+	// Update canary deployment
+	canaryDeployment := &appsv1.Deployment{}
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: pd.Namespace,
+		Name:      pd.Status.CanaryDeployment,
+	}, canaryDeployment); err != nil {
+		log.Error(err, "Failed to get canary deployment")
+		return err
+	}
+
+	canaryDeployment.Spec.Replicas = &canaryReplicas
+	if err := r.Update(ctx, canaryDeployment); err != nil {
+		log.Error(err, "Failed to update canary deployment replicas")
+		return err
+	}
+	log.Info("Updated canary deployment", "replicas", canaryReplicas)
+
+	return nil
 }
 
 // +kubebuilder:rbac:groups=apps.my.domain,resources=progressivedeployments,verbs=get;list;watch;create;update;patch;delete
