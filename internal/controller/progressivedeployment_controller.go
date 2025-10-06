@@ -183,21 +183,45 @@ func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, p
 	log := logf.FromContext(ctx)
 	log.Info("Handling Analyzing phase")
 
-	// TODO: Check if stepDuration has elapsed
-	// TODO: Query Prometheus metrics
-	// TODO: Determine if healthy or unhealthy
+	stepDuration := pd.Spec.StepDuration.Duration
+	now := metav1.Now()
 
-	// For now, just move to Promoting phase (simulate healthy)
+	// If LastAnalysisTime is not set, this is the first time - set it and wait
+	if pd.Status.LastAnalysisTime == nil {
+		log.Info("Starting analysis period", "duration", stepDuration)
+		pd.Status.LastAnalysisTime = &now
+		if err := r.updateStatus(ctx, pd); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Wait for stepDuration before next reconcile
+		return ctrl.Result{RequeueAfter: stepDuration}, nil
+	}
+
+	// Check if enough time has elapsed
+	elapsed := now.Sub(pd.Status.LastAnalysisTime.Time)
+	if elapsed < stepDuration {
+		remaining := stepDuration - elapsed
+		log.Info("Still analyzing", "elapsed", elapsed, "remaining", remaining)
+		// Wait for remaining time
+		return ctrl.Result{RequeueAfter: remaining}, nil
+	}
+
+	// Enough time passed - analyze metrics and decide
+	log.Info("Analysis period complete", "elapsed", elapsed)
+
+	// TODO: Query Prometheus metrics here
+	// For now, assume healthy
+
+	// Metrics healthy - move to Promoting
 	pd.Status.Phase = "Promoting"
 	pd.Status.HealthStatus = "Healthy"
+	pd.Status.LastAnalysisTime = nil // Reset for next step
 
 	if err := r.updateStatus(ctx, pd); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	log.Info("Metrics healthy, moving to Promoting phase")
-
-	// Requeue to handle Promoting phase
 	return ctrl.Result{}, nil
 }
 

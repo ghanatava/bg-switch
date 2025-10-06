@@ -187,6 +187,9 @@ spec:
                 - Unhealthy
                 - Unknown
                 type: string
+              lastAnalysisTime:
+                format: date-time
+                type: string
               metrics:
                 additionalProperties:
                   type: number

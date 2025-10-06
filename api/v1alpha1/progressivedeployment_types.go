@@ -90,7 +90,8 @@ type ProgressiveDeploymentStatus struct {
 	// +kubebuilder:validation:Type=object
 	Metrics map[string]float64 `json:"metrics,omitempty"`
 	// Conditions represent the latest available observations
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Conditions       []metav1.Condition `json:"conditions,omitempty"`
+	LastAnalysisTime *metav1.Time       `json:"lastAnalysisTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
