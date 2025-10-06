@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,6 +28,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	appsv1alpha1 "github.com/ghanatava/bg-switch/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 )
 
 // ProgressiveDeploymentReconciler reconciles a ProgressiveDeployment object
@@ -39,25 +42,140 @@ func (r *ProgressiveDeploymentReconciler) updateStatus(ctx context.Context, pd *
 	return r.Status().Update(ctx, pd)
 }
 
+func (r *ProgressiveDeploymentReconciler) getTargetDeployment(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (*appsv1.Deployment, error) {
+	log := logf.FromContext(ctx)
+
+	deployment := &appsv1.Deployment{}
+	err := r.Get(ctx, client.ObjectKey{
+		Namespace: pd.Namespace,
+		Name:      pd.Spec.TargetDeployment,
+	}, deployment)
+
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Error(err, "Target deployment not found", "deployment", pd.Spec.TargetDeployment)
+			return nil, err
+		}
+		log.Error(err, "Failed to get target deployment")
+		return nil, err
+	}
+
+	log.Info("Found target deployment", "name", deployment.Name, "replicas", *deployment.Spec.Replicas)
+	return deployment, nil
+}
+
+// createCanaryDeployment creates a canary Deployment as a clone of the target
+func (r *ProgressiveDeploymentReconciler) createCanaryDeployment(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment, targetDeployment *appsv1.Deployment) (*appsv1.Deployment, error) {
+	log := logf.FromContext(ctx)
+
+	// Generate canary deployment name
+	canaryName := fmt.Sprintf("%s-canary", pd.Spec.TargetDeployment)
+
+	// Clone the target deployment spec
+	canary := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      canaryName,
+			Namespace: pd.Namespace,
+			Labels: map[string]string{
+				"app":                    targetDeployment.Labels["app"],
+				"progressive-deployment": pd.Name,
+				"deployment-type":        "canary",
+			},
+		},
+		Spec: *targetDeployment.Spec.DeepCopy(),
+	}
+
+	// Update canary pod labels to differentiate from stable
+	if canary.Spec.Template.Labels == nil {
+		canary.Spec.Template.Labels = make(map[string]string)
+	}
+	canary.Spec.Template.Labels["version"] = "canary"
+	canary.Spec.Template.Labels["deployment-type"] = "canary"
+
+	// Update selector to match new labels
+	if canary.Spec.Selector == nil {
+		canary.Spec.Selector = &metav1.LabelSelector{}
+	}
+	if canary.Spec.Selector.MatchLabels == nil {
+		canary.Spec.Selector.MatchLabels = make(map[string]string)
+	}
+	canary.Spec.Selector.MatchLabels["app"] = targetDeployment.Labels["app"]
+	canary.Spec.Selector.MatchLabels["version"] = "canary"
+
+	// Start with 0 replicas - we'll adjust based on canary percentage
+	replicas := int32(0)
+	canary.Spec.Replicas = &replicas
+
+	// Set owner reference so canary gets deleted when ProgressiveDeployment is deleted
+	if err := ctrl.SetControllerReference(pd, canary, r.Scheme); err != nil {
+		log.Error(err, "Failed to set controller reference")
+		return nil, err
+	}
+
+	// Create the canary deployment
+	if err := r.Create(ctx, canary); err != nil {
+		if errors.IsAlreadyExists(err) {
+			log.Info("Canary deployment already exists", "name", canaryName)
+			// Fetch existing canary
+			existingCanary := &appsv1.Deployment{}
+			if err := r.Get(ctx, client.ObjectKey{Namespace: pd.Namespace, Name: canaryName}, existingCanary); err != nil {
+				return nil, err
+			}
+			return existingCanary, nil
+		}
+		log.Error(err, "Failed to create canary deployment")
+		return nil, err
+	}
+
+	log.Info("Created canary deployment", "name", canaryName, "replicas", 0)
+	return canary, nil
+}
+
+// handleInitializing creates the canary deployment
 func (r *ProgressiveDeploymentReconciler) handleInitializing(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Handling Initializing phase")
 
-	// TODO: Create canary deployment
-	// TODO: Verify target deployment exists
+	// Step 1: Get the target deployment
+	targetDeployment, err := r.getTargetDeployment(ctx, pd)
+	if err != nil {
+		// Update status to Failed
+		pd.Status.Phase = "Failed"
+		pd.Status.HealthStatus = "Unknown"
+		if updateErr := r.updateStatus(ctx, pd); updateErr != nil {
+			log.Error(updateErr, "Failed to update status")
+		}
+		return ctrl.Result{}, err
+	}
 
-	// For now, just move to Analyzing phase
+	// Step 2: Create canary deployment
+	canary, err := r.createCanaryDeployment(ctx, pd, targetDeployment)
+	if err != nil {
+		// Update status to Failed
+		pd.Status.Phase = "Failed"
+		pd.Status.HealthStatus = "Unknown"
+		if updateErr := r.updateStatus(ctx, pd); updateErr != nil {
+			log.Error(updateErr, "Failed to update status")
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Step 3: Update status
 	pd.Status.Phase = "Analyzing"
 	pd.Status.CurrentStep = 0
 	pd.Status.CanaryPercentage = pd.Spec.CanarySteps[0]
+	pd.Status.CanaryDeployment = canary.Name
+	pd.Status.HealthStatus = "Unknown"
 
 	if err := r.updateStatus(ctx, pd); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Moved to Analyzing phase", "step", pd.Status.CurrentStep, "percentage", pd.Status.CanaryPercentage)
+	log.Info("Moved to Analyzing phase",
+		"step", pd.Status.CurrentStep,
+		"percentage", pd.Status.CanaryPercentage,
+		"canary", pd.Status.CanaryDeployment)
 
-	// Requeue to handle Analyzing phase
 	return ctrl.Result{}, nil
 }
 
