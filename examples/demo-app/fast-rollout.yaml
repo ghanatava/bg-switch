@@ -1,0 +1,15 @@
+apiVersion: apps.my.domain/v1alpha1
+kind: ProgressiveDeployment
+metadata:
+  name: demo-app-fast
+  namespace: default
+spec:
+  targetDeployment: demo-app
+  canarySteps: [50, 100]  # Only 2 steps - faster!
+  stepDuration: 15s        # Quick 15s per step
+  autoPromote: true
+  metrics:
+    prometheusUrl: "http://prometheus:9090"
+    errorRate:
+      query: 'rate(http_requests_total{job="demo-app",status=~"5.."}[5m])'
+      threshold: 0.01

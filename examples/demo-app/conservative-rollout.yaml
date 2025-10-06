@@ -1,0 +1,18 @@
+apiVersion: apps.my.domain/v1alpha1
+kind: ProgressiveDeployment
+metadata:
+  name: demo-app-conservative
+  namespace: default
+spec:
+  targetDeployment: demo-app
+  canarySteps: [5, 10, 25, 50, 75, 100]  # Many small steps
+  stepDuration: 2m                        # Wait 2 minutes per step
+  autoPromote: false                      # Manual approval required!
+  metrics:
+    prometheusUrl: "http://prometheus:9090"
+    errorRate:
+      query: 'rate(http_requests_total{job="demo-app",status=~"5.."}[5m])'
+      threshold: 0.005  # Stricter: 0.5% error rate max
+    latency:
+      query: 'histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="demo-app"}[5m]))'
+      threshold: 0.3    # Stricter: 300ms max (p99)
