@@ -214,9 +214,9 @@ kubebuilder create api --group apps --version v1alpha1 --kind ProgressiveDeploym
 #### Day 3-4: Controller Logic (8-10 hours)
 
 **Tasks:**
-- [ ] Implement reconciliation loop
-- [ ] Watch target Deployment
-- [ ] Create canary Deployment on CRD creation
+- [x] Implement reconciliation loop
+- [x] Watch target Deployment
+- [x] Create canary Deployment on CRD creation
 - [x] Implement basic state machine
 - [x] Add logging
 
