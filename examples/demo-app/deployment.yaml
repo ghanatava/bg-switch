@@ -17,28 +17,50 @@ spec:
         version: v1
     spec:
       containers:
-      - name: nginx
-        image: nginx:1.25
-        ports:
-        - containerPort: 80
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
+        - name: app
+          image: quay.io/brancz/prometheus-example-app:v0.3.0
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8080
+              name: metrics
+          env:
+            - name: ERROR_RATE
+              value: "0.005"  # 0.5% error rate
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: demo-app
   namespace: default
+  labels:
+    app: demo-app
 spec:
   selector:
     app: demo-app
   ports:
-  - port: 80
-    targetPort: 80
-    protocol: TCP
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
   type: ClusterIP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-app
+  namespace: default
+  labels:
+    app: demo-app
+spec:
+  selector:
+    matchLabels:
+      app: demo-app
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

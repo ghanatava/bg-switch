@@ -21,11 +21,11 @@ spec:
   # Prometheus metrics configuration
   metrics:
     # Prometheus URL (optional, defaults to in-cluster)
-    prometheusUrl: "http://prometheus.monitoring.svc.cluster.local:9090"
+    prometheusUrl: "http://monitoring-kube-prometheus-prometheus.default.svc.cluster.local:9090"
     
     # Error rate threshold
     errorRate:
-      query: 'rate(http_requests_total{job="demo-app",status=~"5.."}[5m])'
+      query: '(sum(rate(http_requests_total{job="demo-app",status="500"}[1m])) or vector(0)) / sum(rate(http_requests_total{job="demo-app"}[1m]))'
       threshold: 0.01  # 1% error rate max
     
     # Latency threshold (p95)

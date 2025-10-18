@@ -30,3 +30,15 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+    - apps
+  resources:
+    - deployments
+  verbs:
+    - get
+    - patch
+    - update
+    - create
+    - list
+    - delete
+    - watch

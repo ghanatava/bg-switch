@@ -230,10 +230,49 @@ func (r *ProgressiveDeploymentReconciler) handleAnalyzing(ctx context.Context, p
 	// TODO: Query Prometheus metrics here
 	// For now, assume healthy
 
-	// Metrics healthy - move to Promoting
-	pd.Status.Phase = "Promoting"
-	pd.Status.HealthStatus = "Healthy"
-	pd.Status.LastAnalysisTime = nil // Reset for next step
+	// Create metrics client
+	metricsClient, err := NewMetricsClient(pd.Spec.Metrics.PrometheusURL)
+	if err != nil {
+		log.Error(err, "Failed to create metrics client")
+		pd.Status.Phase = "Failed"
+		pd.Status.HealthStatus = "Unknown"
+		if err := r.updateStatus(ctx, pd); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Analyze health using Prometheus metrics
+	healthy, metrics, err := metricsClient.AnalyzeHealth(ctx, pd)
+	if err != nil {
+		// Treat query errors (like "no data") as unhealthy → triggers rollback
+		log.Error(err, "Failed to query metrics - treating as unhealthy, triggering rollback")
+		pd.Status.Phase = "RollingBack" // ← FIXED! Go to RollingBack
+		pd.Status.HealthStatus = "Unhealthy"
+		pd.Status.Metrics = metrics
+		pd.Status.LastAnalysisTime = nil
+		if err := r.updateStatus(ctx, pd); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil // ← Note: return nil error, not err
+	}
+
+	// Store actual metric values in status
+	pd.Status.Metrics = metrics
+
+	if healthy {
+		// Metrics healthy - move to Promoting
+		log.Info("✅ Metrics HEALTHY - proceeding to promotion", "metrics", metrics)
+		pd.Status.Phase = "Promoting"
+		pd.Status.HealthStatus = "Healthy"
+		pd.Status.LastAnalysisTime = nil // Reset for next step
+	} else {
+		// Metrics unhealthy - trigger rollback
+		log.Info("❌ Metrics UNHEALTHY - initiating rollback", "metrics", metrics)
+		pd.Status.Phase = "RollingBack"
+		pd.Status.HealthStatus = "Unhealthy"
+		pd.Status.LastAnalysisTime = nil // Reset
+	}
 
 	if err := r.updateStatus(ctx, pd); err != nil {
 		return ctrl.Result{}, err
@@ -279,20 +318,76 @@ func (r *ProgressiveDeploymentReconciler) handlePromoting(ctx context.Context, p
 
 func (r *ProgressiveDeploymentReconciler) handleRollingBack(ctx context.Context, pd *appsv1alpha1.ProgressiveDeployment) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	log.Info("Handling RollingBack phase")
+	log.Info("Handling RollingBack phase - restoring stable deployment")
 
-	// TODO: Restore stable deployment
-	// TODO: Delete canary deployment
+	// Step 1: Get the target (stable) deployment
+	targetDeployment, err := r.getTargetDeployment(ctx, pd)
+	if err != nil {
+		log.Error(err, "Failed to get target deployment during rollback")
+		pd.Status.Phase = "Failed"
+		if updateErr := r.updateStatus(ctx, pd); updateErr != nil {
+			log.Error(updateErr, "Failed to update status")
+		}
+		return ctrl.Result{}, err
+	}
 
-	// For now, just mark as RolledBack
+	// Step 2: Get the canary deployment
+	canaryDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, client.ObjectKey{
+		Namespace: pd.Namespace,
+		Name:      pd.Status.CanaryDeployment,
+	}, canaryDeployment)
+
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Canary deployment already deleted, skipping")
+		} else {
+			log.Error(err, "Failed to get canary deployment during rollback")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Step 3: Calculate original total replicas
+	// We need to restore stable to full capacity
+	originalReplicas := *targetDeployment.Spec.Replicas
+	if canaryDeployment != nil && canaryDeployment.Spec.Replicas != nil {
+		// Add current canary replicas to get the total
+		originalReplicas += *canaryDeployment.Spec.Replicas
+	}
+
+	log.Info("Rolling back traffic distribution",
+		"stableReplicas", originalReplicas,
+		"canaryReplicas", 0)
+
+	// Step 4: Restore stable deployment to full replicas
+	targetDeployment.Spec.Replicas = &originalReplicas
+	if err := r.Update(ctx, targetDeployment); err != nil {
+		log.Error(err, "Failed to restore stable deployment replicas")
+		return ctrl.Result{}, err
+	}
+	log.Info("✅ Restored stable deployment to full capacity", "replicas", originalReplicas)
+
+	// Step 5: Scale canary to 0 replicas (if it exists)
+	if canaryDeployment != nil && canaryDeployment.Name != "" {
+		zeroReplicas := int32(0)
+		canaryDeployment.Spec.Replicas = &zeroReplicas
+		if err := r.Update(ctx, canaryDeployment); err != nil {
+			log.Error(err, "Failed to scale down canary deployment")
+			return ctrl.Result{}, err
+		}
+		log.Info("✅ Scaled canary deployment to zero", "name", canaryDeployment.Name)
+	}
+
+	// Step 6: Update status to RolledBack
 	pd.Status.Phase = "RolledBack"
 	pd.Status.CanaryPercentage = 0
+	pd.Status.HealthStatus = "Unhealthy"
 
 	if err := r.updateStatus(ctx, pd); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Rollback completed")
+	log.Info("🔄 Rollback completed successfully - stable deployment restored")
 
 	return ctrl.Result{}, nil
 }
@@ -372,7 +467,7 @@ func (r *ProgressiveDeploymentReconciler) adjustTraffic(ctx context.Context, pd 
 // +kubebuilder:rbac:groups=apps.my.domain,resources=progressivedeployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps.my.domain,resources=progressivedeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=apps.my.domain,resources=progressivedeployments/finalizers,verbs=update
-
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
