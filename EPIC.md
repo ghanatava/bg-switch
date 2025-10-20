@@ -291,11 +291,11 @@ func calculateReplicas(total int, canaryPercent int) (stable, canary int) {
 #### Day 8-10: Prometheus Integration (10-12 hours)
 
 **Tasks:**
-- [ ] Add Prometheus client library
-- [ ] Implement metrics client
-- [ ] Query Prometheus API
-- [ ] Parse PromQL results
-- [ ] Handle connection errors
+- [x] Add Prometheus client library
+- [x] Implement metrics client
+- [x] Query Prometheus API
+- [x] Parse PromQL results
+- [x] Handle connection errors
 
 **Dependencies:**
 ```go
@@ -327,11 +327,11 @@ func (m *MetricsClient) QueryMetric(ctx context.Context, query string) (float64,
 #### Day 11-12: Health Analysis (8-10 hours)
 
 **Tasks:**
-- [ ] Implement health analyzer
-- [ ] Compare metrics to thresholds
-- [ ] Determine overall health status
-- [ ] Log analysis results
-- [ ] Handle missing metrics gracefully
+- [x] Implement health analyzer
+- [x] Compare metrics to thresholds
+- [x] Determine overall health status
+- [x] Log analysis results
+- [x] Handle missing metrics gracefully
 
 **Health Logic:**
 ```go
@@ -362,13 +362,13 @@ func (h *HealthAnalyzer) Analyze(ctx context.Context, pd *ProgressiveDeployment)
 #### Day 13-14: Auto-Promotion & Rollback (8-10 hours)
 
 **Tasks:**
-- [ ] Implement auto-promotion logic
-- [ ] Wait for stepDuration
-- [ ] Trigger health analysis
-- [ ] Promote if healthy
-- [ ] Implement rollback logic
-- [ ] Restore stable deployment
-- [ ] Clean up canary
+- [x] Implement auto-promotion logic
+- [x] Wait for stepDuration
+- [x] Trigger health analysis
+- [x] Promote if healthy
+- [x] Implement rollback logic
+- [x] Restore stable deployment
+- [x] Clean up canary
 
 **Promotion Flow:**
 ```go
@@ -411,11 +411,11 @@ func (r *Reconciler) Rollback(ctx context.Context, pd *ProgressiveDeployment) er
 #### Day 15-17: CLI & Manual Controls (6-8 hours)
 
 **Tasks:**
-- [ ] Create CLI tool (`bgswitch`)
-- [ ] Implement `promote` command
-- [ ] Implement `rollback` command
-- [ ] Implement `pause` command
-- [ ] Implement `status` command
+- [x] Create CLI tool (`bgswitch`)
+- [x] Implement `promote` command
+- [x] Implement `rollback` command
+- [x] Implement `pause` command
+- [x] Implement `status` command
 
 **CLI Structure:**
 ```go
